@@ -3,7 +3,27 @@ from django.views.decorators.http import require_http_methods
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden, HttpResponseBadRequest
 from django.contrib import messages
 from django.conf import settings
+from urllib.parse import urlparse, parse_qs
 from .models import AppSettings, Playlist, TrackItem, Snapshot
+from .tasks import fetch_playlist_items
+
+
+def _normalize_playlist_id(raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if value == "LM":
+        return value
+    if "youtube.com" in value or "youtu.be" in value:
+        parsed = urlparse(value)
+        qs = parse_qs(parsed.query)
+        list_values = qs.get("list") or []
+        if list_values:
+            return list_values[0].strip()
+        parts = [p for p in parsed.path.split("/") if p]
+        if parts:
+            return parts[-1].strip()
+    return value
 
 def settings_view(request):
     s = AppSettings.load()
@@ -17,10 +37,15 @@ def settings_view(request):
 @require_http_methods(["GET","POST"])
 def playlists_view(request):
     if request.method == "POST":
-        pid = (request.POST.get("playlist_id") or "").strip()
+        pid = _normalize_playlist_id(request.POST.get("playlist_id"))
         if pid:
-            Playlist.objects.get_or_create(playlist_id=pid)
-            messages.success(request, f"Added {pid}")
+            pl, created = Playlist.objects.get_or_create(playlist_id=pid)
+            try:
+                fetched = fetch_playlist_items(pl)
+                status = "Added" if created else "Updated"
+                messages.success(request, f"{status} {pid}. Synced {fetched} items.")
+            except Exception as exc:
+                messages.error(request, f"Saved {pid}, but sync failed: {exc}")
         else:
             messages.error(request, "Playlist ID required.")
         return redirect("playlists")

@@ -1,4 +1,5 @@
 import json
+import pytest
 import responses
 from django.conf import settings
 from freezegun import freeze_time
@@ -36,6 +37,7 @@ MB_RESP_BAZ = {"artists": [{"id": "22222222-2222-2222-2222-222222222222"}]}
 
 @freeze_time("2025-01-01")
 @responses.activate
+@pytest.mark.django_db
 def test_full_refresh_and_snapshot(settings):
     settings.YOUTUBE_API_KEY = "TESTKEY"
     settings.MB_USER_AGENT = "tests/1.0 (test@example.com)"

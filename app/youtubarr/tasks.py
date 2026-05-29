@@ -66,6 +66,13 @@ def fetch_playlist_items(playlist: Playlist):
             playlist.channel_title = sn.get("channelTitle", playlist.channel_title)
             playlist.last_synced = timezone.now()
             playlist.save(update_fields=["title", "channel_title", "last_synced"])
+    else:
+        logger.warning(
+            "YouTube playlist metadata fetch failed for %s: status=%s body=%s",
+            playlist.playlist_id,
+            rmeta.status_code,
+            rmeta.text[:300],
+        )
 
     # --- Fetch playlist items ---
     params = {
@@ -79,6 +86,12 @@ def fetch_playlist_items(playlist: Playlist):
     while True:
         r = requests.get(url, params=params, timeout=30)
         if r.status_code != 200:
+            logger.warning(
+                "YouTube playlist items fetch failed for %s: status=%s body=%s",
+                playlist.playlist_id,
+                r.status_code,
+                r.text[:300],
+            )
             break
         data = r.json()
 
