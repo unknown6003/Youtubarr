@@ -302,6 +302,35 @@ def retry_fallback_job_ids_view(request):
     import_unresolved_tracks_from_youtube.delay()
     return JsonResponse({"queued": True, "reset_jobs": updated}, safe=True)
 
+
+@require_http_methods(["POST"])
+def fallback_manifest_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    jobs = (
+        FallbackImportJob.objects.select_related("track_item", "track_item__playlist", "track_item__artist")
+        .filter(status=FallbackImportJob.STATUS_DONE)
+        .order_by("-updated_at", "-id")[:1000]
+    )
+    data = [
+        {
+            "job_id": j.id,
+            "track_item_id": j.track_item.id,
+            "playlist_id": j.track_item.playlist.playlist_id,
+            "video_id": j.track_item.video_id,
+            "title": j.track_item.title,
+            "artist_guess": j.track_item.artist_name_guess,
+            "artist_name": j.track_item.artist.name if j.track_item.artist else None,
+            "artist_mbid": j.track_item.artist.mbid if j.track_item.artist else None,
+            "video_path": j.video_path,
+            "mp3_path": j.mp3_path,
+            "updated_at": j.updated_at.isoformat(),
+        }
+        for j in jobs
+    ]
+    return JsonResponse(data, safe=False)
+
 @require_http_methods(["POST"])
 def add_liked_music(request):
     Playlist.objects.get_or_create(

@@ -237,3 +237,37 @@ def test_retry_fallback_job_ids_resets_selected_jobs(client, settings):
     assert j1.status == FallbackImportJob.STATUS_PENDING
     assert j1.last_error == ""
     assert j2.status == FallbackImportJob.STATUS_FAILED
+
+
+@pytest.mark.django_db
+def test_fallback_manifest_requires_token(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.post("/api/v1/fallback/manifest")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_fallback_manifest_payload(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    pl = PlaylistFactory(playlist_id="PL_FB_MANIFEST", enabled=True)
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="man001",
+        title="Manifest Artist - Song",
+        channel_title="Manifest Artist - Topic",
+        artist_name_guess="Manifest Artist",
+    )
+    FallbackImportJob.objects.create(
+        track_item=ti,
+        status=FallbackImportJob.STATUS_DONE,
+        video_path="/data/imports/videos/Manifest Artist/file.mp4",
+        mp3_path="/data/imports/music/Manifest Artist/file.mp3",
+    )
+    r = client.post("/api/v1/fallback/manifest?token=secret")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    assert body
+    assert body[0]["video_id"] == "man001"
+    assert body[0]["video_path"].endswith(".mp4")
+    assert body[0]["mp3_path"].endswith(".mp3")
