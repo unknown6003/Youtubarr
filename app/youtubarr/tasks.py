@@ -200,7 +200,10 @@ def refresh_playlists():
     updated = 0
     for pl in Playlist.objects.filter(enabled=True):
         print(f"Fetching items for playlist {pl.playlist_id} ({pl.title})")
-        updated += fetch_playlist_items(pl)
+        try:
+            updated += fetch_playlist_items(pl)
+        except Exception as exc:
+            logger.exception("Playlist sync failed for %s: %s", pl.playlist_id, exc)
     return updated
 
 @shared_task
