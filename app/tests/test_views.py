@@ -287,3 +287,58 @@ def test_fallback_manifest_payload(client, settings):
     assert body[0]["video_id"] == "man001"
     assert body[0]["video_path"].endswith(".mp4")
     assert body[0]["mp3_path"].endswith(".mp3")
+
+
+@pytest.mark.django_db
+def test_validate_fallback_manifest_requires_token(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.post("/api/v1/fallback/manifest/validate")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_validate_fallback_manifest_missing_files(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    pl = PlaylistFactory(playlist_id="PL_FB_VALIDATE", enabled=True)
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="val001",
+        title="Validate Artist - Song",
+        channel_title="Validate Artist - Topic",
+        artist_name_guess="Validate Artist",
+    )
+    FallbackImportJob.objects.create(
+        track_item=ti,
+        status=FallbackImportJob.STATUS_DONE,
+        video_path="/path/does/not/exist-video.mp4",
+        mp3_path="/path/does/not/exist-audio.mp3",
+    )
+    r = client.post("/api/v1/fallback/manifest/validate?token=secret")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["missing_count"] >= 1
+
+
+@pytest.mark.django_db
+def test_reset_missing_fallback_jobs_marks_failed(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    pl = PlaylistFactory(playlist_id="PL_FB_RESETMISS", enabled=True)
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="val002",
+        title="Validate Artist - Song2",
+        channel_title="Validate Artist - Topic",
+        artist_name_guess="Validate Artist",
+    )
+    job = FallbackImportJob.objects.create(
+        track_item=ti,
+        status=FallbackImportJob.STATUS_DONE,
+        video_path="/path/does/not/exist-video2.mp4",
+        mp3_path="/path/does/not/exist-audio2.mp3",
+    )
+    r = client.post("/api/v1/fallback/manifest/reset-missing?token=secret")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reset_jobs"] >= 1
+    job.refresh_from_db()
+    assert job.status == FallbackImportJob.STATUS_FAILED

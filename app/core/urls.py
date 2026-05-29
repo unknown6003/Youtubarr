@@ -25,5 +25,7 @@ urlpatterns = [
     path("api/v1/fallback/retry", views.retry_fallback_jobs_view, name="retry-fallback-jobs"),
     path("api/v1/fallback/retry-ids", views.retry_fallback_job_ids_view, name="retry-fallback-job-ids"),
     path("api/v1/fallback/manifest", views.fallback_manifest_view, name="fallback-manifest"),
+    path("api/v1/fallback/manifest/validate", views.validate_fallback_manifest_view, name="validate-fallback-manifest"),
+    path("api/v1/fallback/manifest/reset-missing", views.reset_missing_fallback_jobs_view, name="reset-missing-fallback-jobs"),
     path("healthz", views.healthz, name="health"),
 ]

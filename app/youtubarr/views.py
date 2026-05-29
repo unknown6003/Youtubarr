@@ -5,6 +5,7 @@ from django.http import JsonResponse, HttpResponse, HttpResponseForbidden, HttpR
 from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
+import os
 from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob, PipelineRun
 from .tasks import (
     fetch_playlist_items,
@@ -337,6 +338,49 @@ def fallback_manifest_view(request):
         for j in jobs
     ]
     return JsonResponse(data, safe=False)
+
+
+@require_http_methods(["POST"])
+def validate_fallback_manifest_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    jobs = FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_DONE).order_by("-updated_at", "-id")[:2000]
+    missing = []
+    for j in jobs:
+        video_ok = bool(j.video_path and os.path.exists(j.video_path))
+        mp3_ok = bool(j.mp3_path and os.path.exists(j.mp3_path))
+        if not (video_ok and mp3_ok):
+            missing.append(
+                {
+                    "job_id": j.id,
+                    "video_exists": video_ok,
+                    "mp3_exists": mp3_ok,
+                    "video_path": j.video_path,
+                    "mp3_path": j.mp3_path,
+                }
+            )
+    return JsonResponse({"missing_count": len(missing), "missing": missing}, safe=True)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def reset_missing_fallback_jobs_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    jobs = FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_DONE).order_by("-updated_at", "-id")[:2000]
+    to_reset_ids = []
+    for j in jobs:
+        video_ok = bool(j.video_path and os.path.exists(j.video_path))
+        mp3_ok = bool(j.mp3_path and os.path.exists(j.mp3_path))
+        if not (video_ok and mp3_ok):
+            to_reset_ids.append(j.id)
+    updated = FallbackImportJob.objects.filter(id__in=to_reset_ids).update(
+        status=FallbackImportJob.STATUS_FAILED,
+        last_error="Local media file missing; reset for retry.",
+    )
+    return JsonResponse({"reset_jobs": updated}, safe=True)
 
 @require_http_methods(["POST"])
 def add_liked_music(request):
