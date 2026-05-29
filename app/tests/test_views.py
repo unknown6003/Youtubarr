@@ -86,3 +86,39 @@ def test_diagnostics_payload(client, settings):
     assert body["fallback_jobs_done"] >= 1
     assert body["last_pipeline_run"] is not None
     assert body["last_pipeline_run"]["status"] == "ok"
+
+
+@pytest.mark.django_db
+def test_trigger_pipeline_requires_token(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.post("/api/v1/pipeline/trigger")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_trigger_pipeline_queues_task(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    with patch("youtubarr.views.refresh_all_and_snapshot.delay") as delayed:
+        r = client.post("/api/v1/pipeline/trigger?token=secret")
+    assert r.status_code == 200
+    assert r.json()["queued"] is True
+    delayed.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_pipeline_runs_requires_token(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.get("/api/v1/pipeline/runs")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_pipeline_runs_payload(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    PipelineRun.objects.create(status=PipelineRun.STATUS_OK, refresh_count=3, snapshot_count=2, latest_payload_count=2)
+    r = client.get("/api/v1/pipeline/runs?token=secret")
+    assert r.status_code == 200
+    payload = r.json()
+    assert isinstance(payload, list)
+    assert payload
+    assert payload[0]["status"] == "ok"

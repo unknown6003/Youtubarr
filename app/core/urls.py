@@ -19,5 +19,7 @@ urlpatterns = [
 
     path("api/v1/lidarr", views.lidarr_youtubarr_view, name="lidarr-youtubarr"),
     path("api/v1/diagnostics", views.diagnostics_view, name="diagnostics"),
+    path("api/v1/pipeline/trigger", views.trigger_pipeline_view, name="trigger-pipeline"),
+    path("api/v1/pipeline/runs", views.pipeline_runs_view, name="pipeline-runs"),
     path("healthz", views.healthz, name="health"),
 ]

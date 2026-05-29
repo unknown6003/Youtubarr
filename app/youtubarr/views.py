@@ -1,11 +1,12 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden, HttpResponseBadRequest
 from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
 from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob, PipelineRun
-from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube, _get_oauth_bundle
+from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube, _get_oauth_bundle, refresh_all_and_snapshot
 
 
 def _normalize_playlist_id(raw: str) -> str:
@@ -191,6 +192,39 @@ def diagnostics_view(request):
     else:
         data["last_pipeline_run"] = None
     return JsonResponse(data, safe=True)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def trigger_pipeline_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    refresh_all_and_snapshot.delay()
+    return JsonResponse({"queued": True}, safe=True)
+
+
+def pipeline_runs_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    runs = PipelineRun.objects.order_by("-started_at", "-id")[:20]
+    data = [
+        {
+            "id": run.id,
+            "status": run.status,
+            "started_at": run.started_at.isoformat(),
+            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+            "refresh_count": run.refresh_count,
+            "normalized_count": run.normalized_count,
+            "snapshot_count": run.snapshot_count,
+            "fallback_count": run.fallback_count,
+            "latest_payload_count": run.latest_payload_count,
+            "last_error": run.last_error,
+        }
+        for run in runs
+    ]
+    return JsonResponse(data, safe=False)
 
 @require_http_methods(["POST"])
 def add_liked_music(request):
