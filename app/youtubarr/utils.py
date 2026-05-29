@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import inspect
 from ytmusicapi import YTMusic, OAuthCredentials
 from django.conf import settings
 
@@ -33,17 +34,25 @@ def get_ytmusic():
     client_id = getattr(settings, "YOUTUBE_OAUTH_CLIENT_ID", "") or ""
     client_secret = getattr(settings, "YOUTUBE_OAUTH_CLIENT_SECRET", "") or ""
 
-    # ytmusicapi has changed OAuth internals across versions.
-    # Prefer explicit credentials when configured, but safely fall back to
-    # plain oauth.json auth if constructor signatures differ.
-    if client_id and client_secret:
-        try:
-            creds = OAuthCredentials(client_id=client_id, client_secret=client_secret)
-            return YTMusic(json_path, oauth_credentials=creds)
-        except TypeError:
-            pass
+    # ytmusicapi OAuthCredentials signatures vary by version.
+    # Build kwargs dynamically so LM auth works across versions.
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            "LM requires OAuth credentials. Set YOUTUBE_OAUTH_CLIENT_ID and "
+            "YOUTUBE_OAUTH_CLIENT_SECRET."
+        )
 
-    return YTMusic(json_path)
+    sig = inspect.signature(OAuthCredentials)
+    kwargs = {}
+    if "client_id" in sig.parameters and "client_secret" in sig.parameters:
+        kwargs = {"client_id": client_id, "client_secret": client_secret}
+    elif "oauth_client_id" in sig.parameters and "oauth_client_secret" in sig.parameters:
+        kwargs = {"oauth_client_id": client_id, "oauth_client_secret": client_secret}
+    else:
+        raise RuntimeError(f"Unsupported OAuthCredentials signature: {sig}")
+
+    creds = OAuthCredentials(**kwargs)
+    return YTMusic(json_path, oauth_credentials=creds)
 
 def fetch_liked_music():
     ytmusic = get_ytmusic()
