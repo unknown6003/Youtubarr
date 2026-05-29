@@ -30,7 +30,20 @@ def get_ytmusic():
     if not os.path.exists(json_path):
         raise RuntimeError("No oauth.json found in /data")
 
-    return YTMusic(json_path, oauth_credentials=OAuthCredentials(client_id=settings.YOUTUBE_OAUTH_CLIENT_ID, client_secret=settings.YOUTUBE_OAUTH_CLIENT_SECRET))
+    client_id = getattr(settings, "YOUTUBE_OAUTH_CLIENT_ID", "") or ""
+    client_secret = getattr(settings, "YOUTUBE_OAUTH_CLIENT_SECRET", "") or ""
+
+    # ytmusicapi has changed OAuth internals across versions.
+    # Prefer explicit credentials when configured, but safely fall back to
+    # plain oauth.json auth if constructor signatures differ.
+    if client_id and client_secret:
+        try:
+            creds = OAuthCredentials(client_id=client_id, client_secret=client_secret)
+            return YTMusic(json_path, oauth_credentials=creds)
+        except TypeError:
+            pass
+
+    return YTMusic(json_path)
 
 def fetch_liked_music():
     ytmusic = get_ytmusic()
