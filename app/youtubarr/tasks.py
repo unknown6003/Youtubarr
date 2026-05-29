@@ -4,14 +4,14 @@ from django.conf import settings
 from django.db import transaction
 from celery import shared_task
 from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot
-from .utils import guess_artist_from_title, fetch_liked_music
-import json
+from .utils import guess_artist_from_title
 from django.utils import timezone
 import logging
 
 logger = logging.getLogger(__name__)
 YT_API_ITEMS = "https://www.googleapis.com/youtube/v3/playlistItems"
 YT_API_PLAYLISTS = "https://www.googleapis.com/youtube/v3/playlists"
+YT_API_VIDEOS = "https://www.googleapis.com/youtube/v3/videos"
 MB_API = "https://musicbrainz.org/ws/2/artist/"
 MB_HEADERS = {"User-Agent": settings.MB_USER_AGENT}
 MB_TIMEOUT_SECONDS = max(5, int(getattr(settings, "MB_TIMEOUT_SECONDS", 45)))
@@ -74,7 +74,37 @@ def _youtube_get(url: str, params: dict):
 
 def fetch_playlist_items(playlist: Playlist):
     if playlist.playlist_id == "LM":
-        items = fetch_liked_music()
+        items = []
+        params = {
+            "part": "snippet,contentDetails",
+            "myRating": "like",
+            "maxResults": min(50, settings.YOUTUBE_QUOTA_SAFE_PAGE_SIZE),
+        }
+        while True:
+            r = _youtube_get(YT_API_VIDEOS, params)
+            if r is None:
+                raise RuntimeError("No OAuth/API key available for LM fetch")
+            if r.status_code != 200:
+                raise RuntimeError(f"LM fetch failed: status={r.status_code} body={r.text[:300]}")
+            data = r.json() or {}
+            for entry in data.get("items", []):
+                sn = entry.get("snippet", {})
+                vd = entry.get("id")
+                if not vd:
+                    continue
+                title = sn.get("title", "")
+                channel = sn.get("channelTitle", "")
+                items.append(
+                    {
+                        "video_id": vd,
+                        "title": title,
+                        "artist": guess_artist_from_title(title, channel),
+                    }
+                )
+            token = data.get("nextPageToken")
+            if not token:
+                break
+            params["pageToken"] = token
         count = 0
         for it in items:
             with transaction.atomic():
