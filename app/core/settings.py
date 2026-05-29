@@ -157,6 +157,10 @@ YOUTUBE_OAUTH_CLIENT_ID = env("YOUTUBE_OAUTH_CLIENT_ID", default="")
 YOUTUBE_OAUTH_CLIENT_SECRET = env("YOUTUBE_OAUTH_CLIENT_SECRET", default="")
 YOUTUBE_QUOTA_SAFE_PAGE_SIZE = int(env("YOUTUBE_QUOTA_SAFE_PAGE_SIZE", default=50))
 MB_USER_AGENT = env("MB_USER_AGENT", default="YTM-Lidarr-List/0.1 (no-contact@example.com)")
+MB_TIMEOUT_SECONDS = int(env("MB_TIMEOUT_SECONDS", default=45))
+MB_MAX_RETRIES = int(env("MB_MAX_RETRIES", default=4))
+MB_REQUEST_DELAY_SECONDS = float(env("MB_REQUEST_DELAY_SECONDS", default=1.05))
+MB_ARTIST_CHUNK_SIZE = int(env("MB_ARTIST_CHUNK_SIZE", default=100))
 
 # Celery
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")

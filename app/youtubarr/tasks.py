@@ -14,8 +14,10 @@ YT_API_ITEMS = "https://www.googleapis.com/youtube/v3/playlistItems"
 YT_API_PLAYLISTS = "https://www.googleapis.com/youtube/v3/playlists"
 MB_API = "https://musicbrainz.org/ws/2/artist/"
 MB_HEADERS = {"User-Agent": settings.MB_USER_AGENT}
-MB_TIMEOUT_SECONDS = 15
-MB_MAX_RETRIES = 3
+MB_TIMEOUT_SECONDS = max(5, int(getattr(settings, "MB_TIMEOUT_SECONDS", 45)))
+MB_MAX_RETRIES = max(1, int(getattr(settings, "MB_MAX_RETRIES", 4)))
+MB_REQUEST_DELAY_SECONDS = max(0.2, float(getattr(settings, "MB_REQUEST_DELAY_SECONDS", 1.05)))
+MB_ARTIST_CHUNK_SIZE = max(1, int(getattr(settings, "MB_ARTIST_CHUNK_SIZE", 100)))
 
 def _get_api_key():
     s = AppSettings.load()
@@ -234,21 +236,36 @@ def refresh_playlists():
 @shared_task
 def resolve_missing_mbids():
     # Respect MB 1 rps
-    names = (TrackItem.objects
-             .filter(blacklisted=False, artist__isnull=True)
-             .exclude(artist_name_guess="")
-             .values_list("artist_name_guess", flat=True)
-             .distinct())
-    for name in names:
-        mbid = search_mb_artist_mbid(name)
-        time.sleep(1.05)  # be a decent citizen
-        if mbid:
-            art, _ = Artist.objects.get_or_create(name=name)
-            if not art.mbid:
-                art.mbid = mbid
-                art.save()
-        else:
-            Artist.objects.get_or_create(name=name)  # create without mbid to avoid re-querying next time
+    names = list(
+        TrackItem.objects
+        .filter(blacklisted=False, artist__isnull=True)
+        .exclude(artist_name_guess="")
+        .values_list("artist_name_guess", flat=True)
+        .distinct()
+    )
+    for start in range(0, len(names), MB_ARTIST_CHUNK_SIZE):
+        chunk = names[start:start + MB_ARTIST_CHUNK_SIZE]
+        logger.info(
+            "Resolving MusicBrainz MBIDs for artists %d-%d of %d",
+            start + 1,
+            min(start + len(chunk), len(names)),
+            len(names),
+        )
+        for name in chunk:
+            try:
+                mbid = search_mb_artist_mbid(name)
+            except Exception as exc:
+                logger.warning("MusicBrainz lookup crashed for %r: %s", name, exc)
+                mbid = None
+            time.sleep(MB_REQUEST_DELAY_SECONDS)
+            if mbid:
+                art, _ = Artist.objects.get_or_create(name=name)
+                if not art.mbid:
+                    art.mbid = mbid
+                    art.save()
+            else:
+                # create without mbid to avoid re-querying next time
+                Artist.objects.get_or_create(name=name)
 
     # Link TrackItems that now have an Artist row
     for ti in TrackItem.objects.filter(artist__isnull=True).exclude(artist_name_guess=""):
