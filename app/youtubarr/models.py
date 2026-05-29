@@ -78,3 +78,30 @@ class FallbackImportJob(models.Model):
 
     class Meta:
         unique_together = ("track_item",)
+
+
+class PipelineRun(models.Model):
+    STATUS_OK = "ok"
+    STATUS_FAILED = "failed"
+    STATUS_RUNNING = "running"
+    STATUS_CHOICES = [
+        (STATUS_OK, "OK"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_RUNNING, "Running"),
+    ]
+
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_RUNNING)
+    refresh_count = models.IntegerField(default=0)
+    normalized_count = models.IntegerField(default=0)
+    snapshot_count = models.IntegerField(default=0)
+    fallback_count = models.IntegerField(default=0)
+    tracks_before = models.IntegerField(default=0)
+    tracks_after = models.IntegerField(default=0)
+    artists_before = models.IntegerField(default=0)
+    artists_after = models.IntegerField(default=0)
+    artists_with_mbid_before = models.IntegerField(default=0)
+    artists_with_mbid_after = models.IntegerField(default=0)
+    latest_payload_count = models.IntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")

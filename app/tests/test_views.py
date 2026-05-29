@@ -1,7 +1,7 @@
 import json
 import pytest
 from django.conf import settings
-from youtubarr.models import Snapshot, FallbackImportJob, TrackItem
+from youtubarr.models import Snapshot, FallbackImportJob, TrackItem, PipelineRun
 from tests.factories import PlaylistFactory
 from unittest.mock import patch
 
@@ -74,6 +74,7 @@ def test_diagnostics_payload(client, settings):
     )
     Snapshot.objects.create(payload=[{"MusicBrainzId": "11111111-1111-1111-1111-111111111111"}])
     FallbackImportJob.objects.create(track_item=ti, status=FallbackImportJob.STATUS_DONE)
+    PipelineRun.objects.create(status=PipelineRun.STATUS_OK, refresh_count=1, snapshot_count=1)
 
     r = client.get("/api/v1/diagnostics?token=secret")
     assert r.status_code == 200
@@ -83,3 +84,5 @@ def test_diagnostics_payload(client, settings):
     assert body["playlists_total"] >= 1
     assert body["snapshot_payload_count"] == 1
     assert body["fallback_jobs_done"] >= 1
+    assert body["last_pipeline_run"] is not None
+    assert body["last_pipeline_run"]["status"] == "ok"

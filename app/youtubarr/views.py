@@ -4,7 +4,7 @@ from django.http import JsonResponse, HttpResponse, HttpResponseForbidden, HttpR
 from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
-from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob
+from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob, PipelineRun
 from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube, _get_oauth_bundle
 
 
@@ -174,6 +174,22 @@ def diagnostics_view(request):
         "snapshot_payload_count": payload_count,
         "snapshot_created_at": latest_snapshot.created_at.isoformat() if latest_snapshot else None,
     }
+    latest_run = PipelineRun.objects.order_by("-started_at", "-id").first()
+    if latest_run:
+        data["last_pipeline_run"] = {
+            "id": latest_run.id,
+            "status": latest_run.status,
+            "started_at": latest_run.started_at.isoformat(),
+            "finished_at": latest_run.finished_at.isoformat() if latest_run.finished_at else None,
+            "refresh_count": latest_run.refresh_count,
+            "normalized_count": latest_run.normalized_count,
+            "snapshot_count": latest_run.snapshot_count,
+            "fallback_count": latest_run.fallback_count,
+            "latest_payload_count": latest_run.latest_payload_count,
+            "last_error": latest_run.last_error,
+        }
+    else:
+        data["last_pipeline_run"] = None
     return JsonResponse(data, safe=True)
 
 @require_http_methods(["POST"])
