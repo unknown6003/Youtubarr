@@ -1,7 +1,4 @@
-import os
 import re
-from ytmusicapi import YTMusic, OAuthCredentials
-from django.conf import settings
 
 def guess_artist_from_title(title: str, channel_title: str) -> str:
     """
@@ -26,27 +23,22 @@ def guess_artist_from_title(title: str, channel_title: str) -> str:
             return cleaned
     return ""
 
-def get_ytmusic():
-    """Return a YTMusic instance. Requires oauth.json."""
-    data_dir = "/data"
-    json_path = os.path.join(data_dir, "oauth.json")
-
-    if not os.path.exists(json_path):
-        raise RuntimeError("No oauth.json found in /data")
-
-    return YTMusic(json_path)
-
-def fetch_liked_music():
-    ytmusic = get_ytmusic()
-    playlist = ytmusic.get_playlist("LM")
-    items = []
-    for track in playlist["tracks"]:
-        vid = track.get("videoId")
-        if not vid:
-            continue
-        items.append({
-            "video_id": vid,
-            "title": track.get("title", ""),
-            "artist": (track.get("artists") or [{}])[0].get("name", ""),
-        })
-    return items
+def mb_artist_candidates(artist_guess: str) -> list[str]:
+    raw = (artist_guess or "").strip()
+    if not raw:
+        return []
+    vals = [raw]
+    # Split multi-artist forms and keep likely primary candidates first.
+    for sep in [" x ", " & ", ",", " / ", " and "]:
+        if sep in raw.lower():
+            parts = [p.strip() for p in re.split(re.escape(sep), raw, flags=re.IGNORECASE) if p.strip()]
+            vals.extend(parts)
+            break
+    norm = []
+    seen = set()
+    for v in vals:
+        cleaned = re.sub(r"\s+", " ", v).strip(" -")
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            norm.append(cleaned)
+    return norm[:5]

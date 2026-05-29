@@ -150,12 +150,10 @@ def lidarr_youtubarr_view(request):
     snap = Snapshot.objects.order_by("-created_at").first()
     return JsonResponse(snap.payload if snap else [], safe=False)
 
+@require_http_methods(["POST"])
 def add_liked_music(request):
-    if request.method == "POST":
-        if not settings.YTMUSIC_COOKIE_JSON:
-            return HttpResponse("YTMUSIC_COOKIE_JSON not configured", status=500)
-        Playlist.objects.get_or_create(
-            playlist_id="LM",
-            defaults={"title": "Liked Music", "channel_title": "YouTube Music"}
-        )
-        return redirect("playlists")
+    Playlist.objects.get_or_create(
+        playlist_id="LM",
+        defaults={"title": "Liked Music", "channel_title": "YouTube Music"}
+    )
+    return redirect("playlists")

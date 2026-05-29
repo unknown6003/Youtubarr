@@ -11,5 +11,4 @@ responses==0.25.3
 factory_boy==3.3.0
 freezegun==1.5.1
 whitenoise[brotli]==6.6.0
-ytmusicapi
-yt-dlp==2026.05.20
+yt-dlp==2026.5.24.234402.dev0

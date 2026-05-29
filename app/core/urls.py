@@ -8,6 +8,8 @@ urlpatterns = [
     path("playlists/", views.playlists_view, name="playlists"),
     path("playlists/force-sync/", views.force_sync_playlists_view, name="force-sync-playlists"),
     path("items/", views.items_view, name="items"),
+    path("fallback-imports/", views.fallback_imports_view, name="fallback-imports"),
+    path("fallback-imports/run/", views.trigger_fallback_imports_view, name="trigger-fallback-imports"),
 
     # HTMX endpoints
     path("items/<int:item_id>/row/", views.item_row, name="item-row"),

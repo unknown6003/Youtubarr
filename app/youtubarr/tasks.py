@@ -1,6 +1,8 @@
 import os
 import subprocess
 import time
+import json
+from collections.abc import Mapping
 import requests
 from dateutil import parser as dateparser
 from django.conf import settings
@@ -8,7 +10,7 @@ from django.db import transaction
 from celery import shared_task
 from celery import chain
 from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot, FallbackImportJob
-from .utils import guess_artist_from_title
+from .utils import guess_artist_from_title, mb_artist_candidates
 from django.utils import timezone
 import logging
 
@@ -29,11 +31,21 @@ def _get_api_key():
 
 
 def _get_oauth_bundle() -> dict:
+    raw = getattr(settings, "YOUTUBE_OAUTH_JSON", "") or ""
+    parsed = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, Mapping):
+                logger.warning("YOUTUBE_OAUTH_JSON must decode to an object; falling back to explicit OAuth env vars.")
+                parsed = {}
+        except json.JSONDecodeError:
+            logger.warning("Invalid YOUTUBE_OAUTH_JSON; falling back to explicit OAuth env vars.")
     return {
-        "access_token": getattr(settings, "YOUTUBE_OAUTH_ACCESS_TOKEN", "") or "",
-        "refresh_token": getattr(settings, "YOUTUBE_OAUTH_REFRESH_TOKEN", "") or "",
-        "client_id": getattr(settings, "YOUTUBE_OAUTH_CLIENT_ID", "") or "",
-        "client_secret": getattr(settings, "YOUTUBE_OAUTH_CLIENT_SECRET", "") or "",
+        "access_token": (parsed.get("access_token") or getattr(settings, "YOUTUBE_OAUTH_ACCESS_TOKEN", "") or ""),
+        "refresh_token": (parsed.get("refresh_token") or getattr(settings, "YOUTUBE_OAUTH_REFRESH_TOKEN", "") or ""),
+        "client_id": (parsed.get("client_id") or getattr(settings, "YOUTUBE_OAUTH_CLIENT_ID", "") or ""),
+        "client_secret": (parsed.get("client_secret") or getattr(settings, "YOUTUBE_OAUTH_CLIENT_SECRET", "") or ""),
     }
 
 
@@ -222,38 +234,40 @@ def fetch_playlist_items(playlist: Playlist):
 
 
 def search_mb_artist_mbid(name: str) -> str | None:
-    if not name:
-        return None
-    params = {"query": f'artist:"{name}"', "fmt": "json"}
-    for attempt in range(1, MB_MAX_RETRIES + 1):
-        try:
-            r = requests.get(MB_API, params=params, headers=MB_HEADERS, timeout=MB_TIMEOUT_SECONDS)
-        except requests.RequestException as exc:
-            logger.warning("MusicBrainz request failed for %r (attempt %d/%d): %s", name, attempt, MB_MAX_RETRIES, exc)
-            if attempt < MB_MAX_RETRIES:
+    for candidate in mb_artist_candidates(name):
+        found = False
+        params = {"query": f'artist:"{candidate}"', "fmt": "json"}
+        for attempt in range(1, MB_MAX_RETRIES + 1):
+            try:
+                r = requests.get(MB_API, params=params, headers=MB_HEADERS, timeout=MB_TIMEOUT_SECONDS)
+            except requests.RequestException as exc:
+                logger.warning("MusicBrainz request failed for %r (attempt %d/%d): %s", candidate, attempt, MB_MAX_RETRIES, exc)
+                if attempt < MB_MAX_RETRIES:
+                    time.sleep(attempt * 1.5)
+                continue
+
+            if r.status_code == 200:
+                js = r.json()
+                arts = js.get("artists") or []
+                if arts:
+                    found = True
+                    return arts[0]["id"]
+                break
+
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < MB_MAX_RETRIES:
+                logger.warning(
+                    "MusicBrainz temporary status for %r: %s (attempt %d/%d)",
+                    candidate,
+                    r.status_code,
+                    attempt,
+                    MB_MAX_RETRIES,
+                )
                 time.sleep(attempt * 1.5)
-            continue
-
-        if r.status_code == 200:
-            js = r.json()
-            arts = js.get("artists") or []
-            if arts:
-                return arts[0]["id"]
-            return None
-
-        # Retry server-side/ratelimit responses; otherwise stop early.
-        if r.status_code in (429, 500, 502, 503, 504) and attempt < MB_MAX_RETRIES:
-            logger.warning(
-                "MusicBrainz temporary status for %r: %s (attempt %d/%d)",
-                name,
-                r.status_code,
-                attempt,
-                MB_MAX_RETRIES,
-            )
-            time.sleep(attempt * 1.5)
-            continue
-        logger.warning("MusicBrainz lookup non-200 for %r: %s", name, r.status_code)
-        return None
+                continue
+            logger.warning("MusicBrainz lookup non-200 for %r: %s", candidate, r.status_code)
+            break
+        if not found:
+            time.sleep(MB_REQUEST_DELAY_SECONDS)
     return None
 
 @shared_task
