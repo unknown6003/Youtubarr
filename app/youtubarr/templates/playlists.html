@@ -12,6 +12,10 @@
   </div>
 </form>
 
+<form method="post" action="{% url 'force-sync-playlists' %}" class="mb-4">{% csrf_token %}
+  <button class="btn btn-primary">Force Sync All Enabled Playlists</button>
+</form>
+
 <div class="card">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">

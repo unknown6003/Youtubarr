@@ -6,6 +6,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),  # <-- use Django's admin
     path("", views.settings_view, name="settings"),
     path("playlists/", views.playlists_view, name="playlists"),
+    path("playlists/force-sync/", views.force_sync_playlists_view, name="force-sync-playlists"),
     path("items/", views.items_view, name="items"),
 
     # HTMX endpoints

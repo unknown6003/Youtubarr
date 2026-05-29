@@ -13,7 +13,9 @@ def _db_tmpdir(settings, tmp_path, django_db_setup, django_db_blocker):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     settings.DATABASES["default"]["NAME"] = str(data_dir / "db.sqlite3")
-    settings.STATIC_ROOT = str(tmp_path / "static")
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    settings.STATIC_ROOT = str(static_root)
     yield
 
 @pytest.fixture

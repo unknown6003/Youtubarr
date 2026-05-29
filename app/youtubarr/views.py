@@ -58,6 +58,23 @@ def items_view(request):
              .order_by("-published_at","-id")[:500])
     return render(request, "items.html", {"items": items})
 
+
+@require_http_methods(["POST"])
+def force_sync_playlists_view(request):
+    total = 0
+    synced_playlists = 0
+    for pl in Playlist.objects.filter(enabled=True):
+        try:
+            total += fetch_playlist_items(pl)
+            synced_playlists += 1
+        except Exception as exc:
+            messages.error(request, f"Sync failed for {pl.playlist_id}: {exc}")
+    if synced_playlists:
+        messages.success(request, f"Force sync complete. Synced {total} items across {synced_playlists} playlists.")
+    else:
+        messages.info(request, "No enabled playlists to sync.")
+    return redirect("playlists")
+
 # ---- HTMX helpers ----
 
 def item_row(request, item_id):

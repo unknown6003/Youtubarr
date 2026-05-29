@@ -1,4 +1,4 @@
-import os, time, requests
+import time, requests
 from dateutil import parser as dateparser
 from django.conf import settings
 from django.db import transaction
@@ -18,6 +18,55 @@ MB_HEADERS = {"User-Agent": settings.MB_USER_AGENT}
 def _get_api_key():
     s = AppSettings.load()
     return s.youtube_api_key or settings.YOUTUBE_API_KEY
+
+
+def _get_oauth_bundle() -> dict:
+    return {
+        "access_token": getattr(settings, "YOUTUBE_OAUTH_ACCESS_TOKEN", "") or "",
+        "refresh_token": getattr(settings, "YOUTUBE_OAUTH_REFRESH_TOKEN", "") or "",
+        "client_id": getattr(settings, "YOUTUBE_OAUTH_CLIENT_ID", "") or "",
+        "client_secret": getattr(settings, "YOUTUBE_OAUTH_CLIENT_SECRET", "") or "",
+    }
+
+
+def _refresh_access_token(bundle: dict) -> str:
+    if not bundle["refresh_token"] or not bundle["client_id"] or not bundle["client_secret"]:
+        return ""
+    resp = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": bundle["client_id"],
+            "client_secret": bundle["client_secret"],
+            "refresh_token": bundle["refresh_token"],
+            "grant_type": "refresh_token",
+        },
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        logger.warning("YouTube OAuth token refresh failed: status=%s body=%s", resp.status_code, resp.text[:300])
+        return ""
+    token = (resp.json() or {}).get("access_token", "")
+    return token or ""
+
+
+def _youtube_get(url: str, params: dict):
+    oauth = _get_oauth_bundle()
+    if oauth["access_token"]:
+        headers = {"Authorization": f"Bearer {oauth['access_token']}"}
+        r = requests.get(url, params=params, headers=headers, timeout=30)
+        if r.status_code in (401, 403):
+            refreshed = _refresh_access_token(oauth)
+            if refreshed:
+                headers = {"Authorization": f"Bearer {refreshed}"}
+                r = requests.get(url, params=params, headers=headers, timeout=30)
+        return r
+
+    api_key = _get_api_key()
+    if not api_key:
+        return None
+    key_params = dict(params)
+    key_params["key"] = api_key
+    return requests.get(url, params=key_params, timeout=30)
 
 def fetch_playlist_items(playlist: Playlist):
     if playlist.playlist_id == "LM":
@@ -46,17 +95,17 @@ def fetch_playlist_items(playlist: Playlist):
         playlist.last_synced = timezone.now()
         playlist.save(update_fields=["title", "channel_title", "last_synced"])
         return count
-    api_key = _get_api_key()
-    if not api_key:
+    if not _get_oauth_bundle()["access_token"] and not _get_api_key():
         return 0
 
     # --- Fetch playlist metadata ---
     meta_params = {
         "part": "snippet",
         "id": playlist.playlist_id,
-        "key": api_key,
     }
-    rmeta = requests.get(YT_API_PLAYLISTS, params=meta_params, timeout=30)
+    rmeta = _youtube_get(YT_API_PLAYLISTS, meta_params)
+    if rmeta is None:
+        return 0
     if rmeta.status_code == 200:
         meta = rmeta.json()
         items = meta.get("items", [])
@@ -79,12 +128,13 @@ def fetch_playlist_items(playlist: Playlist):
         "part": "snippet,contentDetails",
         "playlistId": playlist.playlist_id,
         "maxResults": settings.YOUTUBE_QUOTA_SAFE_PAGE_SIZE,
-        "key": api_key,
     }
     count = 0
     url = YT_API_ITEMS
     while True:
-        r = requests.get(url, params=params, timeout=30)
+        r = _youtube_get(url, params)
+        if r is None:
+            break
         if r.status_code != 200:
             logger.warning(
                 "YouTube playlist items fetch failed for %s: status=%s body=%s",

@@ -77,3 +77,43 @@ def test_full_refresh_and_snapshot(settings):
     snap = Snapshot.objects.order_by("-created_at").first()
     assert snap and {"MusicBrainzId": "11111111-1111-1111-1111-111111111111"} in snap.payload
     assert {"MusicBrainzId": "22222222-2222-2222-2222-222222222222"} in snap.payload
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_playlist_fetch_uses_oauth_and_refresh(settings):
+    settings.YOUTUBE_API_KEY = ""
+    settings.YOUTUBE_OAUTH_ACCESS_TOKEN = "expired-token"
+    settings.YOUTUBE_OAUTH_REFRESH_TOKEN = "refresh-token"
+    settings.YOUTUBE_OAUTH_CLIENT_ID = "client-id"
+    settings.YOUTUBE_OAUTH_CLIENT_SECRET = "client-secret"
+
+    pl = PlaylistFactory(playlist_id="PL_TEST")
+
+    responses.add(
+        responses.GET,
+        "https://www.googleapis.com/youtube/v3/playlists",
+        status=401,
+        json={"error": {"message": "Expired token"}},
+    )
+    responses.add(
+        responses.POST,
+        "https://oauth2.googleapis.com/token",
+        status=200,
+        json={"access_token": "fresh-token"},
+    )
+    responses.add(
+        responses.GET,
+        "https://www.googleapis.com/youtube/v3/playlists",
+        status=200,
+        json=YT_META,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.googleapis.com/youtube/v3/playlistItems",
+        status=200,
+        json=YT_ITEMS,
+    )
+
+    assert refresh_playlists() == 2
+    assert TrackItem.objects.count() == 2

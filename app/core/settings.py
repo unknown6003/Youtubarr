@@ -139,11 +139,22 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # External config
 LIDARR_TOKEN = env("LIDARR_TOKEN", default=None)
 YOUTUBE_API_KEY = env("YOUTUBE_API_KEY", default="")
+YOUTUBE_OAUTH_ACCESS_TOKEN = env("YOUTUBE_OAUTH_ACCESS_TOKEN", default="")
+YOUTUBE_OAUTH_REFRESH_TOKEN = env("YOUTUBE_OAUTH_REFRESH_TOKEN", default="")
+YOUTUBE_OAUTH_CLIENT_ID = env("YOUTUBE_OAUTH_CLIENT_ID", default="")
+YOUTUBE_OAUTH_CLIENT_SECRET = env("YOUTUBE_OAUTH_CLIENT_SECRET", default="")
 YOUTUBE_QUOTA_SAFE_PAGE_SIZE = int(env("YOUTUBE_QUOTA_SAFE_PAGE_SIZE", default=50))
 MB_USER_AGENT = env("MB_USER_AGENT", default="YTM-Lidarr-List/0.1 (no-contact@example.com)")
 
