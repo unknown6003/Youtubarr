@@ -14,6 +14,8 @@ YT_API_ITEMS = "https://www.googleapis.com/youtube/v3/playlistItems"
 YT_API_PLAYLISTS = "https://www.googleapis.com/youtube/v3/playlists"
 MB_API = "https://musicbrainz.org/ws/2/artist/"
 MB_HEADERS = {"User-Agent": settings.MB_USER_AGENT}
+MB_TIMEOUT_SECONDS = 15
+MB_MAX_RETRIES = 3
 
 def _get_api_key():
     s = AppSettings.load()
@@ -187,12 +189,35 @@ def search_mb_artist_mbid(name: str) -> str | None:
     if not name:
         return None
     params = {"query": f'artist:"{name}"', "fmt": "json"}
-    r = requests.get(MB_API, params=params, headers=MB_HEADERS, timeout=30)
-    if r.status_code == 200:
-        js = r.json()
-        arts = js.get("artists") or []
-        if arts:
-            return arts[0]["id"]
+    for attempt in range(1, MB_MAX_RETRIES + 1):
+        try:
+            r = requests.get(MB_API, params=params, headers=MB_HEADERS, timeout=MB_TIMEOUT_SECONDS)
+        except requests.RequestException as exc:
+            logger.warning("MusicBrainz request failed for %r (attempt %d/%d): %s", name, attempt, MB_MAX_RETRIES, exc)
+            if attempt < MB_MAX_RETRIES:
+                time.sleep(attempt * 1.5)
+            continue
+
+        if r.status_code == 200:
+            js = r.json()
+            arts = js.get("artists") or []
+            if arts:
+                return arts[0]["id"]
+            return None
+
+        # Retry server-side/ratelimit responses; otherwise stop early.
+        if r.status_code in (429, 500, 502, 503, 504) and attempt < MB_MAX_RETRIES:
+            logger.warning(
+                "MusicBrainz temporary status for %r: %s (attempt %d/%d)",
+                name,
+                r.status_code,
+                attempt,
+                MB_MAX_RETRIES,
+            )
+            time.sleep(attempt * 1.5)
+            continue
+        logger.warning("MusicBrainz lookup non-200 for %r: %s", name, r.status_code)
+        return None
     return None
 
 @shared_task
