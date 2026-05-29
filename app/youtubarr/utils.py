@@ -1,5 +1,25 @@
 import re
 
+_ARTIST_NOISE_PATTERNS = [
+    r"\bofficial\b",
+    r"\bvideo\b",
+    r"\blyrics?\b",
+    r"\blive\b",
+    r"\bremix\b",
+    r"\baudio\b",
+    r"\btopic\b",
+    r"\bvevo\b",
+    r"\brecords?\b",
+]
+
+
+def _normalize_artist_token(value: str) -> str:
+    cleaned = (value or "").strip()
+    cleaned = re.sub(r"[\(\[].*?[\)\]]", " ", cleaned)
+    cleaned = re.sub("|".join(_ARTIST_NOISE_PATTERNS), " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
+    return cleaned
+
 def guess_artist_from_title(title: str, channel_title: str) -> str:
     """
     Heuristics:
@@ -37,7 +57,7 @@ def mb_artist_candidates(artist_guess: str) -> list[str]:
     norm = []
     seen = set()
     for v in vals:
-        cleaned = re.sub(r"\s+", " ", v).strip(" -")
+        cleaned = _normalize_artist_token(v)
         if cleaned and cleaned.lower() not in seen:
             seen.add(cleaned.lower())
             norm.append(cleaned)
