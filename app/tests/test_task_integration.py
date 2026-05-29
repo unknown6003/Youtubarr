@@ -4,7 +4,7 @@ import responses
 from django.conf import settings
 from freezegun import freeze_time
 from youtubarr.models import Snapshot, Artist, TrackItem
-from youtubarr.tasks import refresh_playlists, resolve_missing_mbids, build_snapshot
+from youtubarr.tasks import refresh_playlists, resolve_missing_mbids, build_snapshot, _get_oauth_bundle, search_mb_artist_mbid
 from tests.factories import PlaylistFactory
 
 YT_ITEMS = {
@@ -117,3 +117,52 @@ def test_playlist_fetch_uses_oauth_and_refresh(settings):
 
     assert refresh_playlists() == 2
     assert TrackItem.objects.count() == 2
+
+
+def test_oauth_json_bundle_parsing(settings):
+    settings.YOUTUBE_OAUTH_JSON = json.dumps(
+        {
+            "access_token": "at-json",
+            "refresh_token": "rt-json",
+            "client_id": "cid-json",
+            "client_secret": "csec-json",
+        }
+    )
+    settings.YOUTUBE_OAUTH_ACCESS_TOKEN = "at-env"
+    bundle = _get_oauth_bundle()
+    assert bundle["access_token"] == "at-json"
+    assert bundle["refresh_token"] == "rt-json"
+    assert bundle["client_id"] == "cid-json"
+    assert bundle["client_secret"] == "csec-json"
+
+
+def test_oauth_json_non_object_fallbacks_to_env(settings):
+    settings.YOUTUBE_OAUTH_JSON = json.dumps(["not-an-object"])
+    settings.YOUTUBE_OAUTH_ACCESS_TOKEN = "at-env"
+    settings.YOUTUBE_OAUTH_REFRESH_TOKEN = "rt-env"
+    settings.YOUTUBE_OAUTH_CLIENT_ID = "cid-env"
+    settings.YOUTUBE_OAUTH_CLIENT_SECRET = "csec-env"
+    bundle = _get_oauth_bundle()
+    assert bundle["access_token"] == "at-env"
+    assert bundle["refresh_token"] == "rt-env"
+    assert bundle["client_id"] == "cid-env"
+    assert bundle["client_secret"] == "csec-env"
+
+
+@responses.activate
+def test_mb_lookup_uses_candidate_split():
+    responses.add(
+        responses.GET,
+        "https://musicbrainz.org/ws/2/artist/",
+        match=[responses.matchers.query_param_matcher({"query": 'artist:"Foo x Bar"', "fmt": "json"})],
+        json={"artists": []},
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://musicbrainz.org/ws/2/artist/",
+        match=[responses.matchers.query_param_matcher({"query": 'artist:"Foo"', "fmt": "json"})],
+        json={"artists": [{"id": "33333333-3333-3333-3333-333333333333"}]},
+        status=200,
+    )
+    assert search_mb_artist_mbid("Foo x Bar") == "33333333-3333-3333-3333-333333333333"
