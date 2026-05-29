@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
 from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob
-from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube
+from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube, _get_oauth_bundle
 
 
 def _normalize_playlist_id(raw: str) -> str:
@@ -149,6 +149,32 @@ def lidarr_youtubarr_view(request):
         return HttpResponseForbidden("missing/invalid token")
     snap = Snapshot.objects.order_by("-created_at").first()
     return JsonResponse(snap.payload if snap else [], safe=False)
+
+
+def diagnostics_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+
+    oauth = _get_oauth_bundle()
+    latest_snapshot = Snapshot.objects.order_by("-created_at").first()
+    payload_count = len(latest_snapshot.payload) if latest_snapshot else 0
+
+    data = {
+        "oauth_ready": bool(oauth.get("access_token") and oauth.get("client_id")),
+        "api_key_ready": bool(settings.YOUTUBE_API_KEY),
+        "playlists_total": Playlist.objects.count(),
+        "playlists_enabled": Playlist.objects.filter(enabled=True).count(),
+        "tracks_total": TrackItem.objects.count(),
+        "tracks_with_artist_guess": TrackItem.objects.exclude(artist_name_guess="").count(),
+        "tracks_linked_artist": TrackItem.objects.filter(artist__isnull=False).count(),
+        "fallback_jobs_total": FallbackImportJob.objects.count(),
+        "fallback_jobs_done": FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_DONE).count(),
+        "fallback_jobs_failed": FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_FAILED).count(),
+        "snapshot_payload_count": payload_count,
+        "snapshot_created_at": latest_snapshot.created_at.isoformat() if latest_snapshot else None,
+    }
+    return JsonResponse(data, safe=True)
 
 @require_http_methods(["POST"])
 def add_liked_music(request):

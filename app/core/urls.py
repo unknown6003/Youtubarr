@@ -18,5 +18,6 @@ urlpatterns = [
     path("items/<int:item_id>/delete/", views.delete_item, name="delete-item"),
 
     path("api/v1/lidarr", views.lidarr_youtubarr_view, name="lidarr-youtubarr"),
+    path("api/v1/diagnostics", views.diagnostics_view, name="diagnostics"),
     path("healthz", views.healthz, name="health"),
 ]
