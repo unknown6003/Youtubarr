@@ -12,6 +12,7 @@ from celery import chain
 from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot, FallbackImportJob
 from .utils import guess_artist_from_title, mb_artist_candidates
 from django.utils import timezone
+from django.db.models import Q
 import logging
 
 logger = logging.getLogger(__name__)
@@ -426,7 +427,8 @@ def import_unresolved_tracks_from_youtube():
     if not settings.YOUTUBE_FALLBACK_ENABLE:
         return 0
     queryset = (
-        TrackItem.objects.filter(blacklisted=False, artist__isnull=True)
+        TrackItem.objects.filter(blacklisted=False)
+        .filter(Q(artist__isnull=True) | Q(artist__mbid__isnull=True) | Q(artist__mbid__exact=""))
         .exclude(video_id="")
         .exclude(fallback_jobs__status=FallbackImportJob.STATUS_DONE)
         .order_by("-published_at", "-id")[: settings.YOUTUBE_FALLBACK_MAX_PER_RUN]
