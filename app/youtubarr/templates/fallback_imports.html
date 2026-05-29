@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="display-6 fw-semibold mb-3">Fallback Imports</h1>
+<p class="text-muted mb-3">
+  Direct YouTube media import for unresolved tracks (video + mp3).
+</p>
+
+{% if fallback_enabled %}
+<form method="post" action="{% url 'trigger-fallback-imports' %}" class="mb-4">{% csrf_token %}
+  <button class="btn btn-primary">Run Fallback Import Now</button>
+</form>
+{% else %}
+<div class="alert alert-warning">Fallback import is disabled. Set <code>YOUTUBE_FALLBACK_ENABLE=true</code> in your environment.</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Status</th>
+          <th>Playlist</th>
+          <th>Track</th>
+          <th>Video ID</th>
+          <th>Video Path</th>
+          <th>MP3 Path</th>
+          <th>Last Error</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.status }}</td>
+          <td>{{ j.track_item.playlist.playlist_id }}</td>
+          <td>{{ j.track_item.title }}</td>
+          <td class="text-monospace small">{{ j.track_item.video_id }}</td>
+          <td class="small">{{ j.video_path|default:"-" }}</td>
+          <td class="small">{{ j.mp3_path|default:"-" }}</td>
+          <td class="small">{{ j.last_error|default:"-" }}</td>
+          <td class="text-nowrap">{{ j.updated_at }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="text-muted">No fallback import jobs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -12,3 +12,4 @@ factory_boy==3.3.0
 freezegun==1.5.1
 whitenoise[brotli]==6.6.0
 ytmusicapi
+yt-dlp==2026.05.20

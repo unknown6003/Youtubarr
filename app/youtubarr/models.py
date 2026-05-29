@@ -56,3 +56,25 @@ class Snapshot(models.Model):
     """What we actually serve to Lidarr; newest wins."""
     created_at = models.DateTimeField(default=timezone.now)
     payload = models.JSONField()  # [{"MusicBrainzId": "..."}]
+
+
+class FallbackImportJob(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_DONE = "done"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_DONE, "Done"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    track_item = models.ForeignKey(TrackItem, on_delete=models.CASCADE, related_name="fallback_jobs")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    video_path = models.CharField(max_length=1024, blank=True, default="")
+    mp3_path = models.CharField(max_length=1024, blank=True, default="")
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("track_item",)

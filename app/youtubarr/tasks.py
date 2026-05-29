@@ -1,9 +1,13 @@
-import time, requests
+import os
+import subprocess
+import time
+import requests
 from dateutil import parser as dateparser
 from django.conf import settings
 from django.db import transaction
 from celery import shared_task
-from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot
+from celery import chain
+from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot, FallbackImportJob
 from .utils import guess_artist_from_title
 from django.utils import timezone
 import logging
@@ -321,6 +325,73 @@ def build_snapshot():
 @shared_task
 def refresh_all_and_snapshot():
     refresh_playlists.delay()
-    resolve_missing_mbids.delay()
-    # Let MBIDs resolving queue up; then build after a pause is overkill here.
-    build_snapshot.delay()
+    chain(resolve_missing_mbids.si(), build_snapshot.si(), import_unresolved_tracks_from_youtube.si()).delay()
+
+
+def _sanitize_name(value: str) -> str:
+    cleaned = "".join(ch for ch in (value or "") if ch.isalnum() or ch in (" ", "-", "_")).strip()
+    return cleaned[:120] or "unknown"
+
+
+def _download_track_media(video_id: str, artist: str, title: str):
+    video_dir = settings.YOUTUBE_FALLBACK_VIDEO_DIR
+    audio_dir = settings.YOUTUBE_FALLBACK_AUDIO_DIR
+    os.makedirs(video_dir, exist_ok=True)
+    os.makedirs(audio_dir, exist_ok=True)
+
+    safe_video_id = _sanitize_name(video_id)
+    base = f"{_sanitize_name(artist)} - {_sanitize_name(title)} [{safe_video_id}]"
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    video_tpl = os.path.join(video_dir, f"{base}.%(ext)s")
+    audio_tpl = os.path.join(audio_dir, f"{base}.%(ext)s")
+
+    video_run = subprocess.run(
+        ["yt-dlp", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "--print", "after_move:filepath", "-o", video_tpl, url],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=settings.YOUTUBE_FALLBACK_DOWNLOAD_TIMEOUT,
+    )
+    audio_run = subprocess.run(
+        ["yt-dlp", "-f", "bestaudio", "-x", "--audio-format", "mp3", "--print", "after_move:filepath", "-o", audio_tpl, url],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=settings.YOUTUBE_FALLBACK_DOWNLOAD_TIMEOUT,
+    )
+    video_path = (video_run.stdout or "").strip().splitlines()[-1]
+    mp3_path = (audio_run.stdout or "").strip().splitlines()[-1]
+    if not video_path:
+        video_path = os.path.join(video_dir, f"{base}.mp4")
+    if not mp3_path:
+        mp3_path = os.path.join(audio_dir, f"{base}.mp3")
+    return video_path, mp3_path
+
+
+@shared_task
+def import_unresolved_tracks_from_youtube():
+    if not settings.YOUTUBE_FALLBACK_ENABLE:
+        return 0
+    queryset = (
+        TrackItem.objects.filter(blacklisted=False, artist__isnull=True)
+        .exclude(video_id="")
+        .exclude(fallback_jobs__status=FallbackImportJob.STATUS_DONE)
+        .order_by("-published_at", "-id")[: settings.YOUTUBE_FALLBACK_MAX_PER_RUN]
+    )
+    imported = 0
+    for ti in queryset:
+        job, _ = FallbackImportJob.objects.get_or_create(track_item=ti)
+        try:
+            video_path, mp3_path = _download_track_media(ti.video_id, ti.artist_name_guess or ti.channel_title, ti.title)
+            job.status = FallbackImportJob.STATUS_DONE
+            job.video_path = video_path
+            job.mp3_path = mp3_path
+            job.last_error = ""
+            job.save(update_fields=["status", "video_path", "mp3_path", "last_error", "updated_at"])
+            imported += 1
+        except Exception as exc:
+            job.status = FallbackImportJob.STATUS_FAILED
+            job.last_error = str(exc)[:2000]
+            job.save(update_fields=["status", "last_error", "updated_at"])
+            logger.exception("Fallback media import failed for track %s: %s", ti.id, exc)
+    return imported

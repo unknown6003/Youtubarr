@@ -4,8 +4,8 @@ from django.http import JsonResponse, HttpResponse, HttpResponseForbidden, HttpR
 from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
-from .models import AppSettings, Playlist, TrackItem, Snapshot
-from .tasks import fetch_playlist_items
+from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob
+from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube
 
 
 def _normalize_playlist_id(raw: str) -> str:
@@ -57,6 +57,31 @@ def items_view(request):
              .select_related("playlist","artist")
              .order_by("-published_at","-id")[:500])
     return render(request, "items.html", {"items": items})
+
+
+def fallback_imports_view(request):
+    jobs = (
+        FallbackImportJob.objects.select_related("track_item", "track_item__playlist")
+        .order_by("-updated_at", "-id")[:500]
+    )
+    return render(
+        request,
+        "fallback_imports.html",
+        {
+            "jobs": jobs,
+            "fallback_enabled": bool(getattr(settings, "YOUTUBE_FALLBACK_ENABLE", False)),
+        },
+    )
+
+
+@require_http_methods(["POST"])
+def trigger_fallback_imports_view(request):
+    if not getattr(settings, "YOUTUBE_FALLBACK_ENABLE", False):
+        messages.error(request, "Fallback import is disabled. Set YOUTUBE_FALLBACK_ENABLE=true.")
+        return redirect("fallback-imports")
+    import_unresolved_tracks_from_youtube.delay()
+    messages.success(request, "Fallback import job queued.")
+    return redirect("fallback-imports")
 
 
 @require_http_methods(["POST"])
