@@ -6,6 +6,7 @@ from youtubarr.models import Artist, Snapshot, TrackItem
 from youtubarr.tasks import (
     build_snapshot,
     import_unresolved_tracks_from_youtube,
+    normalize_artist_guesses,
     refresh_playlists,
     resolve_missing_mbids,
 )
@@ -20,6 +21,7 @@ class Command(BaseCommand):
         before_mbid_artists = Artist.objects.exclude(mbid__isnull=True).exclude(mbid__exact="").count()
 
         refresh_count = refresh_playlists()
+        normalized_count = normalize_artist_guesses()
         resolve_missing_mbids()
         snapshot_count = build_snapshot()
         fallback_count = import_unresolved_tracks_from_youtube()
@@ -32,6 +34,7 @@ class Command(BaseCommand):
 
         payload = {
             "refresh_count": refresh_count,
+            "normalized_count": normalized_count,
             "snapshot_count": snapshot_count,
             "fallback_count": fallback_count,
             "tracks_before": before_tracks,

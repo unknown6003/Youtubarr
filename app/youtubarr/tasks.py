@@ -282,6 +282,20 @@ def refresh_playlists():
     return updated
 
 @shared_task
+def normalize_artist_guesses():
+    updated = 0
+    queryset = TrackItem.objects.filter(blacklisted=False)
+    for ti in queryset.iterator():
+        candidate = guess_artist_from_title(ti.title or "", ti.channel_title or "")
+        if not candidate:
+            continue
+        if ti.artist_name_guess != candidate:
+            ti.artist_name_guess = candidate
+            ti.save(update_fields=["artist_name_guess"])
+            updated += 1
+    return updated
+
+@shared_task
 def resolve_missing_mbids():
     # Respect MB 1 rps
     names = list(
@@ -338,8 +352,13 @@ def build_snapshot():
 
 @shared_task
 def refresh_all_and_snapshot():
-    refresh_playlists.delay()
-    chain(resolve_missing_mbids.si(), build_snapshot.si(), import_unresolved_tracks_from_youtube.si()).delay()
+    chain(
+        refresh_playlists.si(),
+        normalize_artist_guesses.si(),
+        resolve_missing_mbids.si(),
+        build_snapshot.si(),
+        import_unresolved_tracks_from_youtube.si(),
+    ).delay()
 
 
 def _sanitize_name(value: str) -> str:

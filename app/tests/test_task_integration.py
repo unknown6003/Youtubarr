@@ -4,7 +4,7 @@ import responses
 from django.conf import settings
 from freezegun import freeze_time
 from youtubarr.models import Snapshot, Artist, TrackItem
-from youtubarr.tasks import refresh_playlists, resolve_missing_mbids, build_snapshot, _get_oauth_bundle, search_mb_artist_mbid
+from youtubarr.tasks import refresh_playlists, resolve_missing_mbids, build_snapshot, _get_oauth_bundle, search_mb_artist_mbid, normalize_artist_guesses
 from tests.factories import PlaylistFactory
 
 YT_ITEMS = {
@@ -166,3 +166,19 @@ def test_mb_lookup_uses_candidate_split():
         status=200,
     )
     assert search_mb_artist_mbid("Foo x Bar") == "33333333-3333-3333-3333-333333333333"
+
+
+@pytest.mark.django_db
+def test_normalize_artist_guesses_backfills_from_title():
+    pl = PlaylistFactory(playlist_id="PL_NORM")
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="vidnorm01",
+        title="Alpha Artist - Great Song",
+        channel_title="RandomChannel",
+        artist_name_guess="",
+    )
+    count = normalize_artist_guesses()
+    ti.refresh_from_db()
+    assert count == 1
+    assert ti.artist_name_guess == "Alpha Artist"
