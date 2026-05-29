@@ -353,6 +353,9 @@ def build_snapshot():
 
 @shared_task
 def refresh_all_and_snapshot():
+    if PipelineRun.objects.filter(status=PipelineRun.STATUS_RUNNING).exists():
+        logger.info("Skipping pipeline queue; a pipeline run is already running.")
+        return 0
     chain(
         refresh_playlists.si(),
         normalize_artist_guesses.si(),

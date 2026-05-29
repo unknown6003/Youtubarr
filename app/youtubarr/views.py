@@ -174,6 +174,7 @@ def diagnostics_view(request):
         "fallback_jobs_failed": FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_FAILED).count(),
         "snapshot_payload_count": payload_count,
         "snapshot_created_at": latest_snapshot.created_at.isoformat() if latest_snapshot else None,
+        "pipeline_running": PipelineRun.objects.filter(status=PipelineRun.STATUS_RUNNING).exists(),
     }
     latest_run = PipelineRun.objects.order_by("-started_at", "-id").first()
     if latest_run:
@@ -200,6 +201,8 @@ def trigger_pipeline_view(request):
     token = request.GET.get("token") or request.headers.get("X-Api-Key")
     if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
         return HttpResponseForbidden("missing/invalid token")
+    if PipelineRun.objects.filter(status=PipelineRun.STATUS_RUNNING).exists():
+        return JsonResponse({"queued": False, "reason": "pipeline already running"}, status=409)
     refresh_all_and_snapshot.delay()
     return JsonResponse({"queued": True}, safe=True)
 

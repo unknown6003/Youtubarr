@@ -86,6 +86,7 @@ def test_diagnostics_payload(client, settings):
     assert body["fallback_jobs_done"] >= 1
     assert body["last_pipeline_run"] is not None
     assert body["last_pipeline_run"]["status"] == "ok"
+    assert body["pipeline_running"] is False
 
 
 @pytest.mark.django_db
@@ -103,6 +104,16 @@ def test_trigger_pipeline_queues_task(client, settings):
     assert r.status_code == 200
     assert r.json()["queued"] is True
     delayed.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_trigger_pipeline_conflict_when_running(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    PipelineRun.objects.create(status=PipelineRun.STATUS_RUNNING)
+    r = client.post("/api/v1/pipeline/trigger?token=secret")
+    assert r.status_code == 409
+    body = r.json()
+    assert body["queued"] is False
 
 
 @pytest.mark.django_db
