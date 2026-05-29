@@ -148,6 +148,7 @@ def test_fallback_jobs_filter(client, settings):
     payload = r.json()
     assert payload
     assert payload[0]["status"] == "failed"
+    assert payload[0]["can_retry"] is True
 
 
 @pytest.mark.django_db
@@ -176,3 +177,52 @@ def test_retry_fallback_jobs_resets_failed_and_queues(client, settings):
     job.refresh_from_db()
     assert job.status == FallbackImportJob.STATUS_PENDING
     assert job.last_error == ""
+
+
+@pytest.mark.django_db
+def test_retry_fallback_job_ids_requires_token(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.post("/api/v1/fallback/retry-ids?ids=1,2")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_retry_fallback_job_ids_bad_ids(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.post("/api/v1/fallback/retry-ids?token=secret&ids=foo,bar")
+    assert r.status_code == 400
+    assert r.json()["queued"] is False
+
+
+@pytest.mark.django_db
+def test_retry_fallback_job_ids_resets_selected_jobs(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    pl = PlaylistFactory(playlist_id="PL_FB_RETRY_IDS", enabled=True)
+    ti1 = TrackItem.objects.create(
+        playlist=pl,
+        video_id="fbvid101",
+        title="Retry Artist - Retry Song 1",
+        channel_title="Retry Artist - Topic",
+        artist_name_guess="Retry Artist",
+    )
+    ti2 = TrackItem.objects.create(
+        playlist=pl,
+        video_id="fbvid102",
+        title="Retry Artist - Retry Song 2",
+        channel_title="Retry Artist - Topic",
+        artist_name_guess="Retry Artist",
+    )
+    j1 = FallbackImportJob.objects.create(track_item=ti1, status=FallbackImportJob.STATUS_FAILED, last_error="e1")
+    j2 = FallbackImportJob.objects.create(track_item=ti2, status=FallbackImportJob.STATUS_FAILED, last_error="e2")
+    with patch("youtubarr.views.import_unresolved_tracks_from_youtube.delay") as delayed:
+        r = client.post(f"/api/v1/fallback/retry-ids?token=secret&ids={j1.id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["queued"] is True
+    assert body["reset_jobs"] == 1
+    delayed.assert_called_once()
+    j1.refresh_from_db()
+    j2.refresh_from_db()
+    assert j1.status == FallbackImportJob.STATUS_PENDING
+    assert j1.last_error == ""
+    assert j2.status == FallbackImportJob.STATUS_FAILED

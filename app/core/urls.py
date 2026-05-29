@@ -23,5 +23,6 @@ urlpatterns = [
     path("api/v1/pipeline/runs", views.pipeline_runs_view, name="pipeline-runs"),
     path("api/v1/fallback/jobs", views.fallback_jobs_view, name="fallback-jobs"),
     path("api/v1/fallback/retry", views.retry_fallback_jobs_view, name="retry-fallback-jobs"),
+    path("api/v1/fallback/retry-ids", views.retry_fallback_job_ids_view, name="retry-fallback-job-ids"),
     path("healthz", views.healthz, name="health"),
 ]
