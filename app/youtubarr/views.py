@@ -6,7 +6,13 @@ from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
 from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob, PipelineRun
-from .tasks import fetch_playlist_items, import_unresolved_tracks_from_youtube, _get_oauth_bundle, refresh_all_and_snapshot
+from .tasks import (
+    fetch_playlist_items,
+    import_unresolved_tracks_from_youtube,
+    _get_oauth_bundle,
+    refresh_all_and_snapshot,
+    _mark_stale_running_pipeline_runs,
+)
 
 
 def _normalize_playlist_id(raw: str) -> str:
@@ -201,6 +207,7 @@ def trigger_pipeline_view(request):
     token = request.GET.get("token") or request.headers.get("X-Api-Key")
     if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
         return HttpResponseForbidden("missing/invalid token")
+    _mark_stale_running_pipeline_runs()
     if PipelineRun.objects.filter(status=PipelineRun.STATUS_RUNNING).exists():
         return JsonResponse({"queued": False, "reason": "pipeline already running"}, status=409)
     refresh_all_and_snapshot.delay()

@@ -4,7 +4,9 @@ import responses
 from django.conf import settings
 from freezegun import freeze_time
 from youtubarr.models import Snapshot, Artist, TrackItem
-from youtubarr.tasks import refresh_playlists, resolve_missing_mbids, build_snapshot, _get_oauth_bundle, search_mb_artist_mbid, normalize_artist_guesses
+from youtubarr.tasks import refresh_playlists, resolve_missing_mbids, build_snapshot, _get_oauth_bundle, search_mb_artist_mbid, normalize_artist_guesses, _mark_stale_running_pipeline_runs
+from youtubarr.models import PipelineRun
+from django.utils import timezone
 from tests.factories import PlaylistFactory
 
 YT_ITEMS = {
@@ -182,3 +184,22 @@ def test_normalize_artist_guesses_backfills_from_title():
     ti.refresh_from_db()
     assert count == 1
     assert ti.artist_name_guess == "Alpha Artist"
+
+
+@pytest.mark.django_db
+def test_mark_stale_running_pipeline_runs(settings):
+    settings.PIPELINE_RUNNING_STALE_MINUTES = 1
+    stale = PipelineRun.objects.create(
+        status=PipelineRun.STATUS_RUNNING,
+        started_at=timezone.now() - timezone.timedelta(minutes=10),
+    )
+    fresh = PipelineRun.objects.create(
+        status=PipelineRun.STATUS_RUNNING,
+        started_at=timezone.now(),
+    )
+    updated = _mark_stale_running_pipeline_runs()
+    assert updated == 1
+    stale.refresh_from_db()
+    fresh.refresh_from_db()
+    assert stale.status == PipelineRun.STATUS_FAILED
+    assert fresh.status == PipelineRun.STATUS_RUNNING

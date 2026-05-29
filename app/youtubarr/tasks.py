@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db import transaction
 from celery import shared_task
 from celery import chain
-from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot, FallbackImportJob
+from .models import AppSettings, Playlist, TrackItem, Artist, Snapshot, FallbackImportJob, PipelineRun
 from .utils import guess_artist_from_title, mb_artist_candidates
 from django.utils import timezone
 from django.db.models import Q
@@ -25,6 +25,20 @@ MB_TIMEOUT_SECONDS = max(5, int(getattr(settings, "MB_TIMEOUT_SECONDS", 45)))
 MB_MAX_RETRIES = max(1, int(getattr(settings, "MB_MAX_RETRIES", 4)))
 MB_REQUEST_DELAY_SECONDS = max(0.2, float(getattr(settings, "MB_REQUEST_DELAY_SECONDS", 1.05)))
 MB_ARTIST_CHUNK_SIZE = max(1, int(getattr(settings, "MB_ARTIST_CHUNK_SIZE", 100)))
+
+
+def _mark_stale_running_pipeline_runs() -> int:
+    stale_minutes = max(1, int(getattr(settings, "PIPELINE_RUNNING_STALE_MINUTES", 180)))
+    cutoff = timezone.now() - timezone.timedelta(minutes=stale_minutes)
+    stale_qs = PipelineRun.objects.filter(status=PipelineRun.STATUS_RUNNING, started_at__lt=cutoff)
+    updated = stale_qs.update(
+        status=PipelineRun.STATUS_FAILED,
+        finished_at=timezone.now(),
+        last_error=f"Marked stale after {stale_minutes} minutes without completion.",
+    )
+    if updated:
+        logger.warning("Marked %d stale pipeline run(s) as failed.", updated)
+    return updated
 
 def _get_api_key():
     s = AppSettings.load()
@@ -353,6 +367,7 @@ def build_snapshot():
 
 @shared_task
 def refresh_all_and_snapshot():
+    _mark_stale_running_pipeline_runs()
     if PipelineRun.objects.filter(status=PipelineRun.STATUS_RUNNING).exists():
         logger.info("Skipping pipeline queue; a pipeline run is already running.")
         return 0

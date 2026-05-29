@@ -1,6 +1,7 @@
 import json
 import pytest
 from django.conf import settings
+from django.utils import timezone
 from youtubarr.models import Snapshot, FallbackImportJob, TrackItem, PipelineRun
 from tests.factories import PlaylistFactory
 from unittest.mock import patch
@@ -114,6 +115,21 @@ def test_trigger_pipeline_conflict_when_running(client, settings):
     assert r.status_code == 409
     body = r.json()
     assert body["queued"] is False
+
+
+@pytest.mark.django_db
+def test_trigger_pipeline_clears_stale_running_and_queues(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    settings.PIPELINE_RUNNING_STALE_MINUTES = 1
+    PipelineRun.objects.create(
+        status=PipelineRun.STATUS_RUNNING,
+        started_at=timezone.now() - timezone.timedelta(minutes=10),
+    )
+    with patch("youtubarr.views.refresh_all_and_snapshot.delay") as delayed:
+        r = client.post("/api/v1/pipeline/trigger?token=secret")
+    assert r.status_code == 200
+    assert r.json()["queued"] is True
+    delayed.assert_called_once()
 
 
 @pytest.mark.django_db
