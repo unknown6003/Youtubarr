@@ -226,6 +226,48 @@ def pipeline_runs_view(request):
     ]
     return JsonResponse(data, safe=False)
 
+
+def fallback_jobs_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    status = (request.GET.get("status") or "").strip()
+    jobs = FallbackImportJob.objects.select_related("track_item", "track_item__playlist").order_by("-updated_at", "-id")
+    if status:
+        jobs = jobs.filter(status=status)
+    jobs = jobs[:200]
+    data = [
+        {
+            "id": j.id,
+            "status": j.status,
+            "playlist_id": j.track_item.playlist.playlist_id,
+            "track_item_id": j.track_item.id,
+            "video_id": j.track_item.video_id,
+            "title": j.track_item.title,
+            "video_path": j.video_path,
+            "mp3_path": j.mp3_path,
+            "last_error": j.last_error,
+            "updated_at": j.updated_at.isoformat(),
+        }
+        for j in jobs
+    ]
+    return JsonResponse(data, safe=False)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def retry_fallback_jobs_view(request):
+    token = request.GET.get("token") or request.headers.get("X-Api-Key")
+    if not (settings.LIDARR_TOKEN and token == settings.LIDARR_TOKEN):
+        return HttpResponseForbidden("missing/invalid token")
+    status = (request.GET.get("status") or FallbackImportJob.STATUS_FAILED).strip()
+    updated = FallbackImportJob.objects.filter(status=status).update(
+        status=FallbackImportJob.STATUS_PENDING,
+        last_error="",
+    )
+    import_unresolved_tracks_from_youtube.delay()
+    return JsonResponse({"queued": True, "reset_jobs": updated}, safe=True)
+
 @require_http_methods(["POST"])
 def add_liked_music(request):
     Playlist.objects.get_or_create(

@@ -21,5 +21,7 @@ urlpatterns = [
     path("api/v1/diagnostics", views.diagnostics_view, name="diagnostics"),
     path("api/v1/pipeline/trigger", views.trigger_pipeline_view, name="trigger-pipeline"),
     path("api/v1/pipeline/runs", views.pipeline_runs_view, name="pipeline-runs"),
+    path("api/v1/fallback/jobs", views.fallback_jobs_view, name="fallback-jobs"),
+    path("api/v1/fallback/retry", views.retry_fallback_jobs_view, name="retry-fallback-jobs"),
     path("healthz", views.healthz, name="health"),
 ]

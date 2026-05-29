@@ -122,3 +122,57 @@ def test_pipeline_runs_payload(client, settings):
     assert isinstance(payload, list)
     assert payload
     assert payload[0]["status"] == "ok"
+
+
+@pytest.mark.django_db
+def test_fallback_jobs_requires_token(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    r = client.get("/api/v1/fallback/jobs")
+    assert r.status_code == 403
+
+
+@pytest.mark.django_db
+def test_fallback_jobs_filter(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    pl = PlaylistFactory(playlist_id="PL_FB_FILTER", enabled=True)
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="fbvid001",
+        title="FB Artist - FB Song",
+        channel_title="FB Artist - Topic",
+        artist_name_guess="FB Artist",
+    )
+    FallbackImportJob.objects.create(track_item=ti, status=FallbackImportJob.STATUS_FAILED)
+    r = client.get("/api/v1/fallback/jobs?token=secret&status=failed")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload
+    assert payload[0]["status"] == "failed"
+
+
+@pytest.mark.django_db
+def test_retry_fallback_jobs_resets_failed_and_queues(client, settings):
+    settings.LIDARR_TOKEN = "secret"
+    pl = PlaylistFactory(playlist_id="PL_FB_RETRY", enabled=True)
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="fbvid002",
+        title="Retry Artist - Retry Song",
+        channel_title="Retry Artist - Topic",
+        artist_name_guess="Retry Artist",
+    )
+    job = FallbackImportJob.objects.create(
+        track_item=ti,
+        status=FallbackImportJob.STATUS_FAILED,
+        last_error="boom",
+    )
+    with patch("youtubarr.views.import_unresolved_tracks_from_youtube.delay") as delayed:
+        r = client.post("/api/v1/fallback/retry?token=secret")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["queued"] is True
+    assert body["reset_jobs"] >= 1
+    delayed.assert_called_once()
+    job.refresh_from_db()
+    assert job.status == FallbackImportJob.STATUS_PENDING
+    assert job.last_error == ""
