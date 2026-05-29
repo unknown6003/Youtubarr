@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch
 from types import SimpleNamespace
+import subprocess
 
 from youtubarr.models import TrackItem, FallbackImportJob
 from youtubarr.tasks import import_unresolved_tracks_from_youtube, _sanitize_name
@@ -78,3 +79,36 @@ def test_import_unresolved_tracks_skips_existing_files(settings, tmp_path):
     assert job.status == FallbackImportJob.STATUS_DONE
     assert job.video_path == str(existing_video)
     assert job.mp3_path == str(existing_mp3)
+
+
+@pytest.mark.django_db
+def test_import_unresolved_tracks_retries_then_succeeds(settings, tmp_path):
+    settings.YOUTUBE_FALLBACK_ENABLE = True
+    settings.YOUTUBE_FALLBACK_DOWNLOAD_RETRIES = 2
+    settings.YOUTUBE_FALLBACK_DOWNLOAD_BACKOFF_SECONDS = 0.01
+    video_dir = tmp_path / "videos"
+    audio_dir = tmp_path / "audio"
+    video_dir.mkdir(parents=True, exist_ok=True)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    settings.YOUTUBE_FALLBACK_VIDEO_DIR = str(video_dir)
+    settings.YOUTUBE_FALLBACK_AUDIO_DIR = str(audio_dir)
+
+    pl = PlaylistFactory()
+    ti = TrackItem.objects.create(
+        playlist=pl,
+        video_id="retry123",
+        title="Retry Artist - Retry Song",
+        channel_title="Retry Artist - Topic",
+        artist_name_guess="Retry Artist",
+    )
+    with patch("youtubarr.tasks.subprocess.run") as run:
+        run.side_effect = [
+            subprocess.CalledProcessError(returncode=1, cmd="yt-dlp"),
+            SimpleNamespace(returncode=0, stdout=f"{tmp_path}/videos/file.mp4\n"),
+            SimpleNamespace(returncode=0, stdout=f"{tmp_path}/audio/file.mp3\n"),
+        ]
+        count = import_unresolved_tracks_from_youtube()
+
+    assert count == 1
+    job = FallbackImportJob.objects.get(track_item=ti)
+    assert job.status == FallbackImportJob.STATUS_DONE

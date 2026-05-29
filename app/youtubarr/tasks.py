@@ -384,19 +384,33 @@ def _download_track_media(video_id: str, artist: str, title: str):
     video_tpl = os.path.join(video_dir, f"{base}.%(ext)s")
     audio_tpl = os.path.join(audio_dir, f"{base}.%(ext)s")
 
-    video_run = subprocess.run(
-        ["yt-dlp", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "--print", "after_move:filepath", "-o", video_tpl, url],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=settings.YOUTUBE_FALLBACK_DOWNLOAD_TIMEOUT,
+    retries = max(1, int(getattr(settings, "YOUTUBE_FALLBACK_DOWNLOAD_RETRIES", 3)))
+    backoff = max(0.1, float(getattr(settings, "YOUTUBE_FALLBACK_DOWNLOAD_BACKOFF_SECONDS", 2.0)))
+
+    def _run_with_retries(cmd):
+        last_exc = None
+        for attempt in range(1, retries + 1):
+            try:
+                return subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=settings.YOUTUBE_FALLBACK_DOWNLOAD_TIMEOUT,
+                )
+            except (subprocess.SubprocessError, OSError) as exc:
+                last_exc = exc
+                if attempt < retries:
+                    time.sleep(backoff * attempt)
+                    continue
+                raise RuntimeError(f"Fallback downloader failed after {retries} attempts") from last_exc
+        raise RuntimeError("Fallback downloader failed with no attempts executed")
+
+    video_run = _run_with_retries(
+        ["yt-dlp", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "--print", "after_move:filepath", "-o", video_tpl, url]
     )
-    audio_run = subprocess.run(
-        ["yt-dlp", "-f", "bestaudio", "-x", "--audio-format", "mp3", "--print", "after_move:filepath", "-o", audio_tpl, url],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=settings.YOUTUBE_FALLBACK_DOWNLOAD_TIMEOUT,
+    audio_run = _run_with_retries(
+        ["yt-dlp", "-f", "bestaudio", "-x", "--audio-format", "mp3", "--print", "after_move:filepath", "-o", audio_tpl, url]
     )
     video_out = (video_run.stdout or "").strip().splitlines()
     audio_out = (audio_run.stdout or "").strip().splitlines()
