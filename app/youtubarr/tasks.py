@@ -348,14 +348,20 @@ def _sanitize_name(value: str) -> str:
 
 
 def _download_track_media(video_id: str, artist: str, title: str):
-    video_dir = settings.YOUTUBE_FALLBACK_VIDEO_DIR
-    audio_dir = settings.YOUTUBE_FALLBACK_AUDIO_DIR
+    artist_dir_name = _sanitize_name(artist)
+    video_dir = os.path.join(settings.YOUTUBE_FALLBACK_VIDEO_DIR, artist_dir_name)
+    audio_dir = os.path.join(settings.YOUTUBE_FALLBACK_AUDIO_DIR, artist_dir_name)
     os.makedirs(video_dir, exist_ok=True)
     os.makedirs(audio_dir, exist_ok=True)
 
     safe_video_id = _sanitize_name(video_id)
     base = f"{_sanitize_name(artist)} - {_sanitize_name(title)} [{safe_video_id}]"
     url = f"https://www.youtube.com/watch?v={video_id}"
+    video_path = os.path.join(video_dir, f"{base}.mp4")
+    mp3_path = os.path.join(audio_dir, f"{base}.mp3")
+    if os.path.exists(video_path) and os.path.exists(mp3_path):
+        return video_path, mp3_path
+
     video_tpl = os.path.join(video_dir, f"{base}.%(ext)s")
     audio_tpl = os.path.join(audio_dir, f"{base}.%(ext)s")
 
@@ -373,12 +379,12 @@ def _download_track_media(video_id: str, artist: str, title: str):
         text=True,
         timeout=settings.YOUTUBE_FALLBACK_DOWNLOAD_TIMEOUT,
     )
-    video_path = (video_run.stdout or "").strip().splitlines()[-1]
-    mp3_path = (audio_run.stdout or "").strip().splitlines()[-1]
-    if not video_path:
-        video_path = os.path.join(video_dir, f"{base}.mp4")
-    if not mp3_path:
-        mp3_path = os.path.join(audio_dir, f"{base}.mp3")
+    video_out = (video_run.stdout or "").strip().splitlines()
+    audio_out = (audio_run.stdout or "").strip().splitlines()
+    if video_out:
+        video_path = video_out[-1]
+    if audio_out:
+        mp3_path = audio_out[-1]
     return video_path, mp3_path
 
 
