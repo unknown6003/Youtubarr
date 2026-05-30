@@ -203,3 +203,29 @@ def test_mark_stale_running_pipeline_runs(settings):
     fresh.refresh_from_db()
     assert stale.status == PipelineRun.STATUS_FAILED
     assert fresh.status == PipelineRun.STATUS_RUNNING
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_resolve_missing_mbids_retries_artist_without_mbid(settings):
+    settings.MB_USER_AGENT = "tests/1.0 (test@example.com)"
+    pl = PlaylistFactory(playlist_id="PL_RETRY_MISSING_MBID")
+    artist = Artist.objects.create(name="RetryName", mbid="")
+    TrackItem.objects.create(
+        playlist=pl,
+        video_id="retrymbid01",
+        title="RetryName - Song",
+        channel_title="RetryName - Topic",
+        artist_name_guess="RetryName",
+        artist=artist,
+    )
+    responses.add(
+        responses.GET,
+        "https://musicbrainz.org/ws/2/artist/",
+        match=[responses.matchers.query_param_matcher({"query": 'artist:"RetryName"', "fmt": "json"})],
+        json={"artists": [{"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}]},
+        status=200,
+    )
+    resolve_missing_mbids()
+    artist.refresh_from_db()
+    assert artist.mbid == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"

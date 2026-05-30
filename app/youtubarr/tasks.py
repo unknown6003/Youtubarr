@@ -315,7 +315,8 @@ def resolve_missing_mbids():
     # Respect MB 1 rps
     names = list(
         TrackItem.objects
-        .filter(blacklisted=False, artist__isnull=True)
+        .filter(blacklisted=False)
+        .filter(Q(artist__isnull=True) | Q(artist__mbid__isnull=True) | Q(artist__mbid__exact=""))
         .exclude(artist_name_guess="")
         .values_list("artist_name_guess", flat=True)
         .distinct()
@@ -344,8 +345,8 @@ def resolve_missing_mbids():
                 # create without mbid to avoid re-querying next time
                 Artist.objects.get_or_create(name=name)
 
-    # Link TrackItems that now have an Artist row
-    for ti in TrackItem.objects.filter(artist__isnull=True).exclude(artist_name_guess=""):
+    # Link TrackItems that now have an Artist row (including ones already linked to mbid-empty artists).
+    for ti in TrackItem.objects.filter(blacklisted=False).exclude(artist_name_guess=""):
         try:
             ti.artist = Artist.objects.get(name=ti.artist_name_guess)
             ti.save()
