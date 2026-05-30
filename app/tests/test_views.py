@@ -88,6 +88,8 @@ def test_diagnostics_payload(client, settings):
     assert body["last_pipeline_run"] is not None
     assert body["last_pipeline_run"]["status"] == "ok"
     assert body["pipeline_running"] is False
+    assert "tracks_mbid_resolved" in body
+    assert "tracks_fallback_eligible_pending" in body
 
 
 @pytest.mark.django_db

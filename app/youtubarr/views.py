@@ -6,6 +6,7 @@ from django.contrib import messages
 from django.conf import settings
 from urllib.parse import urlparse, parse_qs
 import os
+from django.db.models import Q
 from .models import AppSettings, Playlist, TrackItem, Snapshot, FallbackImportJob, PipelineRun
 from .tasks import (
     fetch_playlist_items,
@@ -167,6 +168,21 @@ def diagnostics_view(request):
     oauth = _get_oauth_bundle()
     latest_snapshot = Snapshot.objects.order_by("-created_at").first()
     payload_count = len(latest_snapshot.payload) if latest_snapshot else 0
+    fallback_eligible_q = Q(artist__isnull=True) | Q(artist__mbid__isnull=True) | Q(artist__mbid__exact="")
+    fallback_pending = (
+        TrackItem.objects.filter(blacklisted=False)
+        .filter(fallback_eligible_q)
+        .exclude(fallback_jobs__status=FallbackImportJob.STATUS_DONE)
+        .distinct()
+        .count()
+    )
+    mbid_resolved_tracks = (
+        TrackItem.objects.filter(blacklisted=False)
+        .filter(artist__isnull=False)
+        .exclude(artist__mbid__isnull=True)
+        .exclude(artist__mbid__exact="")
+        .count()
+    )
 
     data = {
         "oauth_ready": bool(oauth.get("access_token") and oauth.get("client_id")),
@@ -176,6 +192,8 @@ def diagnostics_view(request):
         "tracks_total": TrackItem.objects.count(),
         "tracks_with_artist_guess": TrackItem.objects.exclude(artist_name_guess="").count(),
         "tracks_linked_artist": TrackItem.objects.filter(artist__isnull=False).count(),
+        "tracks_mbid_resolved": mbid_resolved_tracks,
+        "tracks_fallback_eligible_pending": fallback_pending,
         "fallback_jobs_total": FallbackImportJob.objects.count(),
         "fallback_jobs_done": FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_DONE).count(),
         "fallback_jobs_failed": FallbackImportJob.objects.filter(status=FallbackImportJob.STATUS_FAILED).count(),
